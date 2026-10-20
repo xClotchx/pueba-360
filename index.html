@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Visor Panorámico 360° Interactivo</title>
 
-  <!-- Script oficial de Google Model Viewer para renderizado 3D -->
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 
   <style>
@@ -32,12 +31,10 @@
       overflow: hidden;
     }
 
-    /* Visor 3D que ocupa toda la pantalla */
     model-viewer {
       width: 100%;
       height: 100%;
       background-color: #000;
-      touch-action: pan-y;
     }
 
     #boton-iniciar {
@@ -55,11 +52,7 @@
       font-weight: 600;
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
       cursor: pointer;
-      transition: transform 0.2s ease, opacity 0.3s ease;
-    }
-
-    #boton-iniciar:active {
-      transform: translateX(-50%) scale(0.96);
+      transition: opacity 0.3s ease;
     }
 
     #indicador {
@@ -81,101 +74,87 @@
 <body>
 
   <div id="contenedor">
-    <div id="indicador">Mueve el móvil o arrastra en 360°</div>
+    <div id="indicador">Gira el móvil o arrastra para ver en 360°</div>
 
-    <!-- 
-      Asegúrate de que 'panoramica.glb' esté en la misma carpeta que este index.html.
-      La cámara se sitúa a 0m de distancia para mirar desde el centro de la esfera.
-    -->
     <model-viewer
       id="visor3d"
       src="panoramica.glb"
-      alt="Entorno 360°"
+      alt="Entorno 360"
       camera-controls
       disable-pan
       disable-zoom
-      interaction-prompt="none"
-      camera-orbit="0deg 90deg 0m"
-      min-camera-orbit="auto 20deg 0m"
-      max-camera-orbit="auto 160deg 0m"
-      field-of-view="75deg">
+      scale="10 10 10"
+      camera-target="0m 0m 0m"
+      camera-orbit="0deg 90deg 0.1m"
+      min-camera-orbit="auto auto 0.1m"
+      max-camera-orbit="auto auto 0.1m"
+      field-of-view="80deg">
     </model-viewer>
 
-    <button id="boton-iniciar">Activar Giroscopio</button>
+    <button id="boton-iniciar">Activar Sensor de Movimiento</button>
   </div>
 
   <script>
     const visor = document.getElementById('visor3d');
     const boton = document.getElementById('boton-iniciar');
 
-    // Variables de rotación (Theta = Horizontal 360°, Phi = Vertical/Inclinación)
     let thetaActual = 0;
     let phiActual = 90;
     let thetaObjetivo = 0;
     let phiObjetivo = 90;
 
-    let alfaInicial = null;
-    let giroscopioActivo = false;
+    let sensorIniciado = false;
+    let alfaBase = null;
 
-    // Solicitar permiso de giroscopio al pulsar el botón
     boton.addEventListener('click', async () => {
       boton.style.opacity = '0';
       setTimeout(() => { boton.style.display = 'none'; }, 300);
 
-      // Compatibilidad con iOS (Safari exige HTTPS y permiso explícito)
       if (typeof DeviceOrientationEvent !== 'undefined' && 
           typeof DeviceOrientationEvent.requestPermission === 'function') {
         try {
           const permiso = await DeviceOrientationEvent.requestPermission();
           if (permiso === 'granted') {
-            iniciarGiroscopio();
+            activarSensor();
           }
-        } catch (error) {
-          console.warn('Permiso de giroscopio denegado:', error);
+        } catch (err) {
+          console.warn('Permiso no concedido:', err);
         }
       } else {
-        iniciarGiroscopio();
+        activarSensor();
       }
     });
 
-    function iniciarGiroscopio() {
-      giroscopioActivo = true;
-      window.addEventListener('deviceorientation', manejarGiroscopio);
+    function activarSensor() {
+      sensorIniciado = true;
+      window.addEventListener('deviceorientation', (e) => {
+        if (e.alpha === null || e.beta === null) return;
+
+        if (alfaBase === null) {
+          alfaBase = e.alpha;
+        }
+
+        // Horizontal: si notas que gira al revés horizontalmente, cambia '-deltaAlfa' por 'deltaAlfa'
+        let deltaAlfa = e.alpha - alfaBase;
+        thetaObjetivo = -deltaAlfa;
+
+        // Vertical corregido: sin invertir los grados de inclinación frontal
+        let inclinacion = Math.max(40, Math.min(140, e.beta));
+        phiObjetivo = inclinacion;
+      });
     }
 
-    function manejarGiroscopio(e) {
-      // Tomamos el primer valor como el 'frente' del usuario
-      if (alfaInicial === null && e.alpha !== null) {
-        alfaInicial = e.alpha;
-      }
+    function bucleRender() {
+      if (sensorIniciado) {
+        thetaActual += (thetaObjetivo - thetaActual) * 0.08;
+        phiActual += (phiObjetivo - phiActual) * 0.08;
 
-      // e.alpha = brújula / giro 360° horizontal
-      if (e.alpha !== null) {
-        const deltaAlfa = e.alpha - alfaInicial;
-        thetaObjetivo = deltaAlfa; 
+        visor.cameraOrbit = `${thetaActual}deg ${phiActual}deg 0.1m`;
       }
-
-      // e.beta = inclinación frontal (-180 a 180)
-      if (e.beta !== null) {
-        // Mapeamos para que sujetar el móvil a ~70°-90° mire recto al frente
-        phiObjetivo = Math.max(30, Math.min(150, 180 - e.beta));
-      }
+      requestAnimationFrame(bucleRender);
     }
 
-    // Bucle para actualizar la cámara de forma fluida
-    function animarCamara() {
-      if (giroscopioActivo) {
-        // Interpolación (LERP) para evitar sacudidas bruscas del sensor
-        thetaActual += (thetaObjetivo - thetaActual) * 0.15;
-        phiActual += (phiObjetivo - phiActual) * 0.15;
-
-        // Asignamos la nueva orientación esférica (0m mantiene la vista en el centro)
-        visor.cameraOrbit = `${thetaActual}deg ${phiActual}deg 0m`;
-      }
-      requestAnimationFrame(animarCamara);
-    }
-
-    animarCamara();
+    bucleRender();
   </script>
 </body>
 </html>
