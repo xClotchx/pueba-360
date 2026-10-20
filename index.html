@@ -74,20 +74,19 @@
 <body>
 
   <div id="contenedor">
-    <div id="indicador">Gira el móvil o arrastra para ver en 360°</div>
+    <div id="indicador">Gira con el móvil o arrastra libremente</div>
 
+    <!-- 
+      Eliminamos 'camera-controls' para que model-viewer no pelee con el giroscopio.
+      El control táctil lo gestionamos nosotros en JavaScript para una respuesta 1:1.
+    -->
     <model-viewer
       id="visor3d"
       src="panoramica.glb"
       alt="Entorno 360"
-      camera-controls
-      disable-pan
-      disable-zoom
       scale="10 10 10"
       camera-target="0m 0m 0m"
       camera-orbit="0deg 90deg 0.1m"
-      min-camera-orbit="auto auto 0.1m"
-      max-camera-orbit="auto auto 0.1m"
       field-of-view="80deg">
     </model-viewer>
 
@@ -96,15 +95,45 @@
 
   <script>
     const visor = document.getElementById('visor3d');
+    const contenedor = document.getElementById('contenedor');
     const boton = document.getElementById('boton-iniciar');
 
-    let thetaActual = 0;
-    let phiActual = 90;
-    let thetaObjetivo = 0;
-    let phiObjetivo = 90;
+    // Ángulos actuales de la cámara (Theta: Horizontal, Phi: Vertical)
+    let theta = 0;
+    let phi = 90;
 
-    let sensorIniciado = false;
-    let alfaBase = null;
+    let ultimoAlpha = null;
+    let sensorActivo = false;
+
+    // Arrastre táctil complementario
+    let touchX = 0;
+    let touchY = 0;
+    let isTouching = false;
+
+    contenedor.addEventListener('touchstart', (e) => {
+      touchX = e.touches[0].clientX;
+      touchY = e.touches[0].clientY;
+      isTouching = true;
+    }, { passive: true });
+
+    contenedor.addEventListener('touchmove', (e) => {
+      if (!isTouching) return;
+      const dx = e.touches[0].clientX - touchX;
+      const dy = e.touches[0].clientY - touchY;
+
+      // Arrastrar con el dedo rota la vista libremente
+      theta -= dx * 0.3;
+      phi = Math.max(30, Math.min(150, phi + dy * 0.3));
+
+      actualizarCamara();
+
+      touchX = e.touches[0].clientX;
+      touchY = e.touches[0].clientY;
+    }, { passive: true });
+
+    contenedor.addEventListener('touchend', () => {
+      isTouching = false;
+    });
 
     boton.addEventListener('click', async () => {
       boton.style.opacity = '0';
@@ -115,46 +144,49 @@
         try {
           const permiso = await DeviceOrientationEvent.requestPermission();
           if (permiso === 'granted') {
-            activarSensor();
+            iniciarSensor();
           }
         } catch (err) {
           console.warn('Permiso no concedido:', err);
         }
       } else {
-        activarSensor();
+        iniciarSensor();
       }
     });
 
-    function activarSensor() {
-      sensorIniciado = true;
-      window.addEventListener('deviceorientation', (e) => {
-        if (e.alpha === null || e.beta === null) return;
-
-        if (alfaBase === null) {
-          alfaBase = e.alpha;
-        }
-
-        // Horizontal: si notas que gira al revés horizontalmente, cambia '-deltaAlfa' por 'deltaAlfa'
-        let deltaAlfa = e.alpha - alfaBase;
-        thetaObjetivo = -deltaAlfa;
-
-        // Vertical corregido: sin invertir los grados de inclinación frontal
-        let inclinacion = Math.max(40, Math.min(140, e.beta));
-        phiObjetivo = inclinacion;
-      });
+    function iniciarSensor() {
+      sensorActivo = true;
+      window.addEventListener('deviceorientation', manejarOrientacion);
     }
 
-    function bucleRender() {
-      if (sensorIniciado) {
-        thetaActual += (thetaObjetivo - thetaActual) * 0.08;
-        phiActual += (phiObjetivo - phiActual) * 0.08;
+    function manejarOrientacion(e) {
+      if (e.alpha === null || e.beta === null) return;
 
-        visor.cameraOrbit = `${thetaActual}deg ${phiActual}deg 0.1m`;
+      // 1. Control Horizontal (Alpha) usando deltas relativos
+      if (ultimoAlpha !== null) {
+        let diffAlpha = e.alpha - ultimoAlpha;
+
+        // Corregir el salto de 360° a 0° para que no dé un giro brusco
+        if (diffAlpha > 180) diffAlpha -= 360;
+        if (diffAlpha < -180) diffAlpha += 360;
+
+        // Al girar el cuerpo hacia la derecha, la cámara rota en consecuencia
+        theta -= diffAlpha;
       }
-      requestAnimationFrame(bucleRender);
+      ultimoAlpha = e.alpha;
+
+      // 2. Control Vertical (Beta)
+      // e.beta representa la inclinación del móvil respecto al suelo.
+      // Sujetar el teléfono en posición normal (~60° a 80°) mira al frente (90°).
+      let inclinacionObjetivo = Math.max(35, Math.min(145, e.beta));
+      phi = phi + (inclinacionObjetivo - phi) * 0.15;
+
+      actualizarCamara();
     }
 
-    bucleRender();
+    function actualizarCamara() {
+      visor.cameraOrbit = `${theta}deg ${phi}deg 0.1m`;
+    }
   </script>
 </body>
 </html>
