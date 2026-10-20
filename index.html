@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Visor Panorámico 360° Interactivo</title>
+
+  <!-- Script oficial de Google Model Viewer para renderizado 3D -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      background-color: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    #contenedor {
+      position: relative;
+      width: 100vw;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    /* Visor 3D que ocupa toda la pantalla */
+    model-viewer {
+      width: 100%;
+      height: 100%;
+      background-color: #000;
+      touch-action: pan-y;
+    }
+
+    #boton-iniciar {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      padding: 14px 28px;
+      background-color: #ffffff;
+      color: #000000;
+      border: none;
+      border-radius: 30px;
+      font-size: 15px;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      cursor: pointer;
+      transition: transform 0.2s ease, opacity 0.3s ease;
+    }
+
+    #boton-iniciar:active {
+      transform: translateX(-50%) scale(0.96);
+    }
+
+    #indicador {
+      position: absolute;
+      top: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      pointer-events: none;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="contenedor">
+    <div id="indicador">Mueve el móvil o arrastra en 360°</div>
+
+    <!-- 
+      Asegúrate de que 'panoramica.glb' esté en la misma carpeta que este index.html.
+      La cámara se sitúa a 0m de distancia para mirar desde el centro de la esfera.
+    -->
+    <model-viewer
+      id="visor3d"
+      src="panoramica.glb"
+      alt="Entorno 360°"
+      camera-controls
+      disable-pan
+      disable-zoom
+      interaction-prompt="none"
+      camera-orbit="0deg 90deg 0m"
+      min-camera-orbit="auto 20deg 0m"
+      max-camera-orbit="auto 160deg 0m"
+      field-of-view="75deg">
+    </model-viewer>
+
+    <button id="boton-iniciar">Activar Giroscopio</button>
+  </div>
+
+  <script>
+    const visor = document.getElementById('visor3d');
+    const boton = document.getElementById('boton-iniciar');
+
+    // Variables de rotación (Theta = Horizontal 360°, Phi = Vertical/Inclinación)
+    let thetaActual = 0;
+    let phiActual = 90;
+    let thetaObjetivo = 0;
+    let phiObjetivo = 90;
+
+    let alfaInicial = null;
+    let giroscopioActivo = false;
+
+    // Solicitar permiso de giroscopio al pulsar el botón
+    boton.addEventListener('click', async () => {
+      boton.style.opacity = '0';
+      setTimeout(() => { boton.style.display = 'none'; }, 300);
+
+      // Compatibilidad con iOS (Safari exige HTTPS y permiso explícito)
+      if (typeof DeviceOrientationEvent !== 'undefined' && 
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const permiso = await DeviceOrientationEvent.requestPermission();
+          if (permiso === 'granted') {
+            iniciarGiroscopio();
+          }
+        } catch (error) {
+          console.warn('Permiso de giroscopio denegado:', error);
+        }
+      } else {
+        iniciarGiroscopio();
+      }
+    });
+
+    function iniciarGiroscopio() {
+      giroscopioActivo = true;
+      window.addEventListener('deviceorientation', manejarGiroscopio);
+    }
+
+    function manejarGiroscopio(e) {
+      // Tomamos el primer valor como el 'frente' del usuario
+      if (alfaInicial === null && e.alpha !== null) {
+        alfaInicial = e.alpha;
+      }
+
+      // e.alpha = brújula / giro 360° horizontal
+      if (e.alpha !== null) {
+        const deltaAlfa = e.alpha - alfaInicial;
+        thetaObjetivo = deltaAlfa; 
+      }
+
+      // e.beta = inclinación frontal (-180 a 180)
+      if (e.beta !== null) {
+        // Mapeamos para que sujetar el móvil a ~70°-90° mire recto al frente
+        phiObjetivo = Math.max(30, Math.min(150, 180 - e.beta));
+      }
+    }
+
+    // Bucle para actualizar la cámara de forma fluida
+    function animarCamara() {
+      if (giroscopioActivo) {
+        // Interpolación (LERP) para evitar sacudidas bruscas del sensor
+        thetaActual += (thetaObjetivo - thetaActual) * 0.15;
+        phiActual += (phiObjetivo - phiActual) * 0.15;
+
+        // Asignamos la nueva orientación esférica (0m mantiene la vista en el centro)
+        visor.cameraOrbit = `${thetaActual}deg ${phiActual}deg 0m`;
+      }
+      requestAnimationFrame(animarCamara);
+    }
+
+    animarCamara();
+  </script>
+</body>
+</html>
